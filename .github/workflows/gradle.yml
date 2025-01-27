@@ -2,9 +2,10 @@ name: Rhino CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ 'java-member-perf-test' ]
   pull_request:
-    branches: [ master ]
+    branches: [ 'java-member-perf-test' ]
+  workflow_dispatch:
 
 permissions: read-all
 
