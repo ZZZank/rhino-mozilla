@@ -209,10 +209,7 @@ final class MemberBox implements Serializable {
                                                     cx,
                                                     thisObj,
                                                     originalArgs[0],
-                                                    nativeSetter
-                                                            .getArgTypes()
-                                                            .get(0)
-                                                            .getTypeTag(),
+                                                    nativeSetter.getArgTypes().get(0).getTypeTag(),
                                                     nativeSetter.argNullability[0])
                                             : Undefined.instance;
                             if (nativeSetter.delegateTo == null) {
