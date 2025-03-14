@@ -440,9 +440,9 @@ public class NativeJavaMethod extends BaseFunction {
         int totalPreference = 0;
         for (int j = 0; j < args.length; j++) {
             final var type1 =
-                    member1.vararg && j >= types1.size() ? types1.getLast() : types1.get(j);
+                    member1.vararg && j >= types1.size() ? types1.get(types1.size() - 1) : types1.get(j);
             final var type2 =
-                    member2.vararg && j >= types2.size() ? types2.getLast() : types2.get(j);
+                    member2.vararg && j >= types2.size() ? types2.get(types2.size() - 1) : types2.get(j);
             if (type1 == type2) {
                 continue;
             }

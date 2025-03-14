@@ -211,7 +211,7 @@ final class MemberBox implements Serializable {
                                                     originalArgs[0],
                                                     nativeSetter
                                                             .getArgTypes()
-                                                            .getFirst()
+                                                            .get(0)
                                                             .getTypeTag(),
                                                     nativeSetter.argNullability[0])
                                             : Undefined.instance;
@@ -301,40 +301,45 @@ final class MemberBox implements Serializable {
 
     private static Method searchAccessibleMethod(Method method, Class<?>[] params) {
         int modifiers = method.getModifiers();
-        if (Modifier.isPublic(modifiers) && !Modifier.isStatic(modifiers)) {
-            Class<?> c = method.getDeclaringClass();
-            if (!Modifier.isPublic(c.getModifiers())) {
-                String name = method.getName();
-                Class<?>[] intfs = c.getInterfaces();
-                for (int i = 0, N = intfs.length; i != N; ++i) {
-                    Class<?> intf = intfs[i];
-                    if (Modifier.isPublic(intf.getModifiers())) {
-                        try {
-                            return intf.getMethod(name, params);
-                        } catch (NoSuchMethodException ex) {
-                        } catch (SecurityException ex) {
-                        }
-                    }
-                }
-                for (; ; ) {
-                    c = c.getSuperclass();
-                    if (c == null) {
-                        break;
-                    }
-                    if (Modifier.isPublic(c.getModifiers())) {
-                        try {
-                            Method m = c.getMethod(name, params);
-                            int mModifiers = m.getModifiers();
-                            if (Modifier.isPublic(mModifiers) && !Modifier.isStatic(mModifiers)) {
-                                return m;
-                            }
-                        } catch (NoSuchMethodException ex) {
-                        } catch (SecurityException ex) {
-                        }
-                    }
+        if (!Modifier.isPublic(modifiers) || Modifier.isStatic(modifiers)) {
+            return null;
+        }
+        Class<?> c = method.getDeclaringClass();
+        if (Modifier.isPublic(c.getModifiers())) {
+            return null;
+        }
+        String name = method.getName();
+
+        // scan interfaces
+        for (Class<?> intf : c.getInterfaces()) {
+            if (Modifier.isPublic(intf.getModifiers())) {
+                try {
+                    return intf.getMethod(name, params);
+                } catch (NoSuchMethodException ex) {
+                } catch (SecurityException ex) {
                 }
             }
         }
+
+        // scan super classes
+        for (; ; ) {
+            c = c.getSuperclass();
+            if (c == null) {
+                break;
+            }
+            if (Modifier.isPublic(c.getModifiers())) {
+                try {
+                    Method m = c.getMethod(name, params);
+                    int mModifiers = m.getModifiers();
+                    if (Modifier.isPublic(mModifiers) && !Modifier.isStatic(mModifiers)) {
+                        return m;
+                    }
+                } catch (NoSuchMethodException ex) {
+                } catch (SecurityException ex) {
+                }
+            }
+        }
+
         return null;
     }
 

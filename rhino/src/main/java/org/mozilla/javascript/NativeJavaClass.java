@@ -210,7 +210,7 @@ public class NativeJavaClass extends NativeJavaObject implements Function {
                 varArgs = Context.jsToJava(args[args.length - 1], argTypes.getLast());
             } else {
                 // marshall the variable parameter
-                var componentType = argTypes.getLast().getComponentType();
+                var componentType = argTypes.get(argTypes.size() - 1).getComponentType();
                 varArgs = componentType.newArray(args.length - argTypes.size() + 1);
                 for (int i = 0; i < Array.getLength(varArgs); i++) {
                     Object value = Context.jsToJava(args[argTypes.size() - 1 + i], componentType);
