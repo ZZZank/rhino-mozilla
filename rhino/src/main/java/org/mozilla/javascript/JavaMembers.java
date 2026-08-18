@@ -89,11 +89,6 @@ class JavaMembers {
     Object get(Scriptable obj, VarScope scope, String name, Object javaObject, boolean isStatic) {
         Map<String, Object> ht = isStatic ? staticMembers : members;
         Object member = ht.get(name);
-        if (member instanceof FieldAndMethods fieldAndMethods) {
-            var fam = new FieldAndMethods(scope, fieldAndMethods.withField);
-            fam.javaObject = javaObject;
-            return fam;
-        }
         if (!isStatic && member == null) {
             // Try to get static member from instance (LC3)
             member = staticMembers.get(name);
@@ -107,12 +102,12 @@ class JavaMembers {
         }
 
         // TODO: cache instance in caller NativeJavaObject
-        if (member instanceof ExecutableOverload) {
-            if (member instanceof ExecutableOverload.WithField) {
-                var withField = (ExecutableOverload.WithField) member;
-                return new FieldAndMethods(scope, withField);
+        if (member instanceof ExecutableOverload method) {
+            if (member instanceof ExecutableOverload.WithField withField) {
+                var fam = new FieldAndMethods(scope, withField);
+                fam.javaObject = javaObject;
+                return fam;
             } else {
-                var method = (ExecutableOverload) member;
                 var built = new NativeJavaMethod(method.methods, method.name);
                 ScriptRuntime.setFunctionProtoAndParent(
                         built, Context.getCurrentContext(), scope, false);
