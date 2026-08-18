@@ -893,7 +893,7 @@ class FieldAndMethods extends NativeJavaMethod {
 
     FieldAndMethods(VarScope scope, ExecutableOverload.WithField withField) {
         super(withField.methods, withField.name);
-        this.withField = withField;
+        this.field = withField.field;
         setParentScope(scope);
         setPrototype(ScriptableObject.getFunctionPrototype(scope));
     }
@@ -901,7 +901,6 @@ class FieldAndMethods extends NativeJavaMethod {
     @Override
     public Object getDefaultValue(Class<?> hint) {
         if (hint == ScriptRuntime.FunctionClass) return this;
-        NativeJavaField field = this.withField.field;
         Object rval;
         try {
             rval = field.get(javaObject);
@@ -917,6 +916,6 @@ class FieldAndMethods extends NativeJavaMethod {
         return rval;
     }
 
-    ExecutableOverload.WithField withField;
+    NativeJavaField field;
     Object javaObject;
 }
