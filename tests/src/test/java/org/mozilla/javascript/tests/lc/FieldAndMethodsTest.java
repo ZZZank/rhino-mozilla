@@ -8,15 +8,18 @@ public class FieldAndMethodsTest {
 
     @Test
     public void test() {
-        Utils.runWithAllModes(cx -> {
-            this.fieldAndMethods = "init";
-            this.methodCallResult = -1;
+        Utils.runWithAllModes(
+                cx -> {
+                    this.fieldAndMethods = "init";
+                    this.methodCallResult = -1;
 
-            var topLevel = cx.initStandardObjects();
+                    var topLevel = cx.initStandardObjects();
 
-            topLevel.put("test", topLevel, Context.javaToJS(this, topLevel));
+                    topLevel.put("test", topLevel, Context.javaToJS(this, topLevel));
 
-            return cx.evaluateString(topLevel, """
+                    return cx.evaluateString(
+                            topLevel,
+                            """
                 let assert = test.asser
 
                 assert(test.fieldAndMethods(42) == -1, "method call");
@@ -26,21 +29,28 @@ public class FieldAndMethodsTest {
                 test.fieldAndMethods = 'altered';
                 assert('' + test.fieldAndMethods == 'altered', "field set should take effect");
 
-                """, "FieldsAndMethodTest", 1, null);
-        });
+                """,
+                            "FieldsAndMethodTest",
+                            1,
+                            null);
+                });
     }
 
     /**
-     * see <a href="https://rhino.github.io/tutorials/scripting_java/#limitations">rhino.github.io</a>
+     * see <a
+     * href="https://rhino.github.io/tutorials/scripting_java/#limitations">rhino.github.io</a>
      */
     @Test
     public void lazyField() {
-        Utils.runWithAllModes(cx -> {
-            var topLevel = cx.initStandardObjects();
+        Utils.runWithAllModes(
+                cx -> {
+                    var topLevel = cx.initStandardObjects();
 
-            topLevel.put("test", topLevel, Context.javaToJS(this, topLevel));
+                    topLevel.put("test", topLevel, Context.javaToJS(this, topLevel));
 
-            return cx.evaluateString(topLevel, """
+                    return cx.evaluateString(
+                            topLevel,
+                            """
                 let assert = test.asser
 
                 test.fieldAndMethods = 'init';
@@ -54,8 +64,11 @@ public class FieldAndMethodsTest {
                 assert('' + fam == 'altered', "value of field is resolved lazily");
                 assert(forceConverted == 'init', "but forcefully converted value is not affected");
 
-                """, "FieldsAndMethodTest", 1, null);
-        });
+                """,
+                            "FieldsAndMethodTest",
+                            1,
+                            null);
+                });
     }
 
     public String fieldAndMethods;
