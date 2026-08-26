@@ -13,6 +13,7 @@ import java.io.Serial;
 import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InaccessibleObjectException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.security.AccessControlContext;
@@ -26,7 +27,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
+import org.mozilla.javascript.lc.MemberCollector;
 import org.mozilla.javascript.lc.ReflectUtils;
 import org.mozilla.javascript.lc.member.ExecutableBox;
 import org.mozilla.javascript.lc.member.ExecutableOverload;
@@ -297,107 +300,6 @@ class JavaMembers {
         return member;
     }
 
-    /**
-     * Retrieves mapping of methods to accessible methods for a class. In case the class is not
-     * public, retrieves methods with same signature as its public methods from public superclasses
-     * and interfaces (if they exist). Basically upcasts every method to the nearest accessible
-     * method.
-     */
-    private Collection<Method> discoverAccessibleMethods(
-            Class<?> clazz, boolean includeProtected, boolean includePrivate) {
-        Map<MethodSignature, Method> map = new HashMap<>();
-        discoverAccessibleMethods(clazz, map, includeProtected, includePrivate);
-        return map.values();
-    }
-
-    @SuppressWarnings("deprecation")
-    private void discoverAccessibleMethods(
-            Class<?> clazz,
-            Map<MethodSignature, Method> map,
-            boolean includeProtected,
-            boolean includePrivate) {
-        if (isPublic(clazz.getModifiers()) || includePrivate) {
-            try {
-                if (includeProtected || includePrivate) {
-                    while (clazz != null) {
-                        try {
-                            Method[] methods = clazz.getDeclaredMethods();
-                            for (Method method : methods) {
-                                int mods = method.getModifiers();
-
-                                if (isPublic(mods) || isProtected(mods) || includePrivate) {
-                                    Method registered = registerMethod(map, method);
-                                    // We don't want to replace the deprecated method here
-                                    // because it is not available on Android.
-                                    if (includePrivate && !registered.isAccessible()) {
-                                        registered.setAccessible(true);
-                                    }
-                                }
-                            }
-                            Class<?>[] interfaces = clazz.getInterfaces();
-                            for (Class<?> intface : interfaces) {
-                                discoverAccessibleMethods(
-                                        intface, map, includeProtected, includePrivate);
-                            }
-                            clazz = clazz.getSuperclass();
-                        } catch (SecurityException e) {
-                            // Some security settings (i.e., applets) disallow
-                            // access to Class.getDeclaredMethods. Fall back to
-                            // Class.getMethods.
-                            discoverPublicMethods(clazz, map);
-                            break; // getMethods gets superclass methods, no
-                            // need to loop any more
-                        }
-                    }
-                } else {
-                    discoverPublicMethods(clazz, map);
-                }
-                return;
-            } catch (SecurityException e) {
-                Context.reportWarning(
-                        "Could not discover accessible methods of class "
-                                + clazz.getName()
-                                + " due to lack of privileges, "
-                                + "attemping superclasses/interfaces.");
-                // Fall through and attempt to discover superclass/interface
-                // methods
-            }
-        }
-
-        Class<?>[] interfaces = clazz.getInterfaces();
-        for (Class<?> intface : interfaces) {
-            discoverAccessibleMethods(intface, map, includeProtected, includePrivate);
-        }
-        Class<?> superclass = clazz.getSuperclass();
-        if (superclass != null) {
-            discoverAccessibleMethods(superclass, map, includeProtected, includePrivate);
-        }
-    }
-
-    void discoverPublicMethods(Class<?> clazz, Map<MethodSignature, Method> map) {
-        Method[] methods = clazz.getMethods();
-        for (Method method : methods) {
-            registerMethod(map, method);
-        }
-    }
-
-    static Method registerMethod(Map<MethodSignature, Method> map, Method method) {
-        MethodSignature sig = new MethodSignature(method);
-        // Array may contain methods with same parameter signature but different return value!
-        // (which is allowed in bytecode, but not in JLS) we will take the best method
-        return map.merge(sig, method, JavaMembers::getMoreConcreteMethod);
-    }
-
-    private static Method getMoreConcreteMethod(Method oldValue, Method newValue) {
-        if (oldValue.getReturnType().equals(newValue.getReturnType())) {
-            return oldValue; // same return type. Do not overwrite existing method
-        } else if (oldValue.getReturnType().isAssignableFrom(newValue.getReturnType())) {
-            return newValue; // more concrete return type. Replace method
-        } else {
-            return oldValue;
-        }
-    }
-
     static final class MethodSignature {
         private final String name;
         private final Class<?>[] args;
@@ -407,17 +309,11 @@ class JavaMembers {
             this.args = args;
         }
 
-        MethodSignature(Method method) {
-            this(method.getName(), method.getParameterTypes());
-        }
-
         @Override
         public boolean equals(Object o) {
-            if (o instanceof MethodSignature) {
-                MethodSignature ms = (MethodSignature) o;
-                return ms.name.equals(name) && Arrays.equals(args, ms.args);
-            }
-            return false;
+            return o instanceof MethodSignature other
+                    && other.name.equals(name)
+                    && Arrays.equals(args, other.args);
         }
 
         @Override
@@ -430,7 +326,8 @@ class JavaMembers {
             Context cx, VarScope scope, boolean includeProtected, boolean includePrivate) {
         var typeFactory = TypeInfoFactory.get(scope);
 
-        var accessibleMethods = discoverAccessibleMethods(cl, includeProtected, includePrivate);
+        var accessibleMethods =
+                MemberCollector.collectMethods(cl, includeProtected, includePrivate);
         var accessibleFields = getAccessibleFields(includeProtected, includePrivate);
 
         // We reflect methods first, because we want overloaded field/method
@@ -462,26 +359,72 @@ class JavaMembers {
      * <p>After this method call, member table have instances of: {@link ExecutableOverload}
      */
     protected void collectMethods(
-            Collection<Method> methods, boolean isStatic, TypeInfoFactory typeFactory) {
+            MemberCollector.MemberSnapShot<Method> methods,
+            boolean isStatic,
+            TypeInfoFactory typeFactory) {
         var table = isStatic ? staticMembers : members;
-        var grouped =
-                methods.stream()
-                        .filter(m -> isStatic == Modifier.isStatic(m.getModifiers()))
-                        .collect(Collectors.groupingBy(Method::getName));
+        var grouped = methods.selectMap(isStatic);
 
         for (var entry : grouped.entrySet()) {
             var name = entry.getKey();
             var sameNameMethods = entry.getValue();
 
-            var array = new ExecutableBox[sameNameMethods.size()];
-            var i = 0;
+            // transform and deduplicate
+            var distinct = new HashMap<MethodSignature, ExecutableBox>();
 
             for (var method : sameNameMethods) {
-                array[i++] = new ExecutableBox(method, typeFactory, cl);
+                var box = new ExecutableBox(method, typeFactory, cl);
+
+                var signature =
+                        new MethodSignature(
+                                name,
+                                box.getArgTypes().stream()
+                                        .map(TypeInfo::asClass)
+                                        .toArray(Class[]::new));
+                distinct.merge(signature, box, (a, b) -> compareAmbiguousMethod(a, b) < 0 ? b : a);
             }
 
-            table.put(name, new ExecutableOverload(name, array));
+            for (var distinctEntry : distinct.entrySet()) {
+                var member = distinctEntry.getValue().asMethod();
+
+                @SuppressWarnings("deprecation")
+                var accessible = member.isAccessible();
+                if (!accessible) {
+                    try {
+                        member.setAccessible(true);
+                    } catch (InaccessibleObjectException | SecurityException ignored) {
+                        // discard inaccessible members
+                        entry.setValue(null);
+                    }
+                }
+            }
+
+            table.put(
+                    name,
+                    new ExecutableOverload(
+                            name,
+                            distinct.values().stream()
+                                    .filter(Objects::nonNull)
+                                    .toArray(ExecutableBox[]::new)));
         }
+    }
+
+    private static boolean declareByPublicClass(ExecutableBox box) {
+        return Modifier.isPublic(box.getDeclaringClass().getModifiers());
+    }
+
+    private static int compareAmbiguousMethod(ExecutableBox a, ExecutableBox b) {
+        // more accessible if declaring class is public
+        int result = Boolean.compare(declareByPublicClass(a), declareByPublicClass(b));
+
+        if (result == 0) {
+            var returnTypeA = a.getReturnType().asClass();
+            var returnTypeB = b.getReturnType().asClass();
+            // returnTypeB more concrete, a < b
+            result = returnTypeA.isAssignableFrom(returnTypeB) ? -1 : 1;
+        }
+
+        return result;
     }
 
     /**
@@ -798,7 +741,7 @@ class JavaMembers {
                 return members;
             }
             try {
-                members = createJavaMembers(cache.getAssociatedScope(), cl, includeProtected);
+                members = new JavaMembers(cache.getAssociatedScope(), cl, includeProtected);
                 break;
             } catch (SecurityException e) {
                 // Reflection may fail for objects that are in a restricted
@@ -832,15 +775,6 @@ class JavaMembers {
             }
         }
         return members;
-    }
-
-    private static JavaMembers createJavaMembers(
-            VarScope associatedScope, Class<?> cl, boolean includeProtected) {
-        if (ReflectUtils.IS_MODULAR_JAVA) {
-            return new JavaMembers_jdk11(associatedScope, cl, includeProtected);
-        } else {
-            return new JavaMembers(associatedScope, cl, includeProtected);
-        }
     }
 
     private static Object getSecurityContext() {

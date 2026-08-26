@@ -58,4 +58,14 @@ public abstract class ReflectUtils {
 
         return builder.toString();
     }
+
+    public static boolean isExportedClass(Class<?> clazz) {
+        if (!IS_MODULAR_JAVA) {
+            return true;
+        }
+
+        // `.getModule()` not present on Android, `.getPackageName()` not after API 31.
+        // Android compatibility is ensured by gating it after IS_MODULAR_JAVA
+        return clazz.getModule().isExported(clazz.getPackageName());
+    }
 }
