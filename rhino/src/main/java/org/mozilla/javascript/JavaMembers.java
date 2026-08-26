@@ -14,6 +14,7 @@ import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InaccessibleObjectException;
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.security.AccessControlContext;
@@ -24,12 +25,12 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import org.mozilla.javascript.lc.MemberCollector;
 import org.mozilla.javascript.lc.ReflectUtils;
 import org.mozilla.javascript.lc.member.ExecutableBox;
 import org.mozilla.javascript.lc.member.ExecutableOverload;
@@ -300,6 +301,87 @@ class JavaMembers {
         return member;
     }
 
+    private static MemberSnapShot<Method> getAccessibleMethods(
+            Class<?> clazz, boolean includeProtected, boolean includePrivate) {
+        var result = new MemberSnapShot<Method>();
+
+        if (Modifier.isPublic(clazz.getModifiers())
+                && ReflectUtils.isExportedClass(clazz)
+                && !includeProtected
+                && !includePrivate) {
+            // best case: we have public access and only need public access
+            for (var method : clazz.getMethods()) {
+                result.selectMap(Modifier.isStatic(method.getModifiers()))
+                        .computeIfAbsent(method.getName(), k -> new ArrayList<>())
+                        .add(method);
+            }
+            return result;
+        }
+
+        // in all other cases, Rhino either needs more than public access,
+        // or there's no public access
+
+        var parentClasses = new LinkedHashSet<Class<?>>();
+        ReflectUtils.fillInheritance(parentClasses, clazz);
+
+        for (var parent : parentClasses) {
+            if (!ReflectUtils.isExportedClass(parent)) {
+                continue;
+            }
+
+            Method[] methods;
+            try {
+                methods = parent.getDeclaredMethods();
+            } catch (SecurityException | NoClassDefFoundError e) {
+                // SecurityException: SecurityManager does not allow accessing it, or
+                // NoClassDefFoundError: Some classes in parameter types or return type does not
+                // exist at runtime
+                continue;
+            }
+
+            for (var method : methods) {
+                if (method.isSynthetic()
+                        || !visibleByAccessModifier(method, includeProtected, includePrivate)) {
+                    continue;
+                }
+
+                result.selectMap(Modifier.isStatic(method.getModifiers()))
+                        .computeIfAbsent(method.getName(), k -> new ArrayList<>())
+                        .add(method);
+                // we can ensure now, for added methods:
+                // - their declaring classes are exported (or the java is not modular)
+                // - they meet access modifier requirement
+                // the only remaining question is whether the declaring class is public. But the
+                // principle is "use accessible one whenever possible", not "only use accessible
+                // one", so check will be deferred to LazyJavaMember.resolve(), where it will try
+                // looking for public one, and try making it accessible when none is public
+            }
+        }
+
+        return result;
+    }
+
+    static final class MemberSnapShot<T extends Member> {
+        public final Map<String, List<T>> instanceMembers = new HashMap<>();
+        public final Map<String, List<T>> staticMembers = new HashMap<>();
+
+        public Map<String, List<T>> selectMap(boolean isStatic) {
+            return isStatic ? staticMembers : instanceMembers;
+        }
+    }
+
+    private static boolean visibleByAccessModifier(
+            Method method, boolean includeProtected, boolean includePrivate) {
+        if (includePrivate) {
+            return true;
+        }
+        int mods = method.getModifiers();
+        if (includeProtected) {
+            return Modifier.isPublic(mods) || Modifier.isProtected(mods);
+        }
+        return Modifier.isPublic(mods);
+    }
+
     static final class MethodSignature {
         private final String name;
         private final Class<?>[] args;
@@ -326,8 +408,7 @@ class JavaMembers {
             Context cx, VarScope scope, boolean includeProtected, boolean includePrivate) {
         var typeFactory = TypeInfoFactory.get(scope);
 
-        var accessibleMethods =
-                MemberCollector.collectMethods(cl, includeProtected, includePrivate);
+        var accessibleMethods = getAccessibleMethods(cl, includeProtected, includePrivate);
         var accessibleFields = getAccessibleFields(includeProtected, includePrivate);
 
         // We reflect methods first, because we want overloaded field/method
@@ -359,9 +440,7 @@ class JavaMembers {
      * <p>After this method call, member table have instances of: {@link ExecutableOverload}
      */
     protected void collectMethods(
-            MemberCollector.MemberSnapShot<Method> methods,
-            boolean isStatic,
-            TypeInfoFactory typeFactory) {
+            MemberSnapShot<Method> methods, boolean isStatic, TypeInfoFactory typeFactory) {
         var table = isStatic ? staticMembers : members;
         var grouped = methods.selectMap(isStatic);
 

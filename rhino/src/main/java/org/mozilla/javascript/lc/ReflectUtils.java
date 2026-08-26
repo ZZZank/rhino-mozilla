@@ -1,6 +1,7 @@
 package org.mozilla.javascript.lc;
 
 import java.util.List;
+import java.util.Set;
 import org.mozilla.javascript.lc.type.TypeInfo;
 
 /**
@@ -67,5 +68,22 @@ public abstract class ReflectUtils {
         // `.getModule()` not present on Android, `.getPackageName()` not after API 31.
         // Android compatibility is ensured by gating it after IS_MODULAR_JAVA
         return clazz.getModule().isExported(clazz.getPackageName());
+    }
+
+    /**
+     * The resulting insertion order: superclasses inserted earlier than interfaces, and direct
+     * superclass inserted earlier than indirect superclasses.
+     *
+     * <p>A class might get inserted multiple times. Insertion order above only describes first
+     * insertion
+     */
+    public static void fillInheritance(Set<Class<?>> result, Class<?> target) {
+        result.add(target);
+        if (target.getSuperclass() != null) {
+            fillInheritance(result, target.getSuperclass());
+        }
+        for (var anInterface : target.getInterfaces()) {
+            fillInheritance(result, anInterface);
+        }
     }
 }
